@@ -2,8 +2,15 @@ import os
 import re
 import json
 from typing import Dict, Any, Optional
-import cv2
-from pyzbar.pyzbar import decode
+from dotenv import load_dotenv
+
+try:
+    import cv2
+    from pyzbar.pyzbar import decode
+except Exception:
+    cv2 = None
+    decode = None
+
 import pymupdf # PyMuPDF
 from dotenv import load_dotenv
 
@@ -51,6 +58,8 @@ def decodificar_qr_sunat(texto_qr: str) -> Optional[Dict[str, Any]]:
 
 def escanear_qr_imagen(ruta_imagen: str) -> Optional[Dict[str, Any]]:
     """Busca códigos QR en la imagen."""
+    if not decode or not cv2:
+        return None
     try:
         img = cv2.imread(ruta_imagen)
         if img is None:
@@ -92,19 +101,20 @@ def extraer_datos_pdf(ruta_pdf: str) -> Dict[str, Any]:
                 base_img = doc.extract_image(xref)
                 img_bytes = base_img["image"]
                 
-                # Decodificar imagen temporal
-                import numpy as np
-                np_arr = np.frombuffer(img_bytes, np.uint8)
-                img_cv = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                if img_cv is not None:
-                    qrs = decode(img_cv)
-                    for q in qrs:
-                        data = q.data.decode("utf-8", errors="ignore")
-                        if "|" in data:
-                            qr_res = decodificar_qr_sunat(data)
-                            if qr_res and qr_res["ruc"]:
-                                doc.close()
-                                return qr_res
+                # Decodificar imagen temporal si hay soporte QR
+                if decode and cv2:
+                    import numpy as np
+                    np_arr = np.frombuffer(img_bytes, np.uint8)
+                    img_cv = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    if img_cv is not None:
+                        qrs = decode(img_cv)
+                        for q in qrs:
+                            data = q.data.decode("utf-8", errors="ignore")
+                            if "|" in data:
+                                qr_res = decodificar_qr_sunat(data)
+                                if qr_res and qr_res["ruc"]:
+                                    doc.close()
+                                    return qr_res
                                 
         doc.close()
         
