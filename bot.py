@@ -3,7 +3,7 @@ import re
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -22,7 +22,6 @@ import report_generator
 # Cargar variables de entorno
 load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBAPP_URL = os.getenv("WEBAPP_URL", "")
 
 # Configurar logging
 logging.basicConfig(
@@ -43,19 +42,12 @@ ESPERANDO_RUC_CONSULTA = 20
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "comprobantes_fotos")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-def obtener_teclado_principal(user_id: int = None) -> ReplyKeyboardMarkup:
-    """Devuelve el teclado con todas las opciones institucionales y la Mini App."""
-    if WEBAPP_URL and WEBAPP_URL.startswith("https://"):
-        url_final = f"{WEBAPP_URL}?user_id={user_id}" if user_id else WEBAPP_URL
-        boton_app = KeyboardButton("📱 Abrir Mini App", web_app=WebAppInfo(url=url_final))
-    else:
-        boton_app = KeyboardButton("📱 Abrir Mini App")
-
+def obtener_teclado_principal() -> ReplyKeyboardMarkup:
+    """Devuelve el teclado con todas las opciones institucionales."""
     teclado = [
         [KeyboardButton("📊 Ver Saldo / 100%"), KeyboardButton("🧾 Mis Gastos")],
-        [boton_app, KeyboardButton("🔍 Consultar RUC")],
-        [KeyboardButton("👤 Mi Perfil"), KeyboardButton("➕ Nueva Comisión")],
-        [KeyboardButton("🏁 Cerrar y Descargar")]
+        [KeyboardButton("🔍 Consultar RUC"), KeyboardButton("👤 Mi Perfil")],
+        [KeyboardButton("➕ Nueva Comisión"), KeyboardButton("🏁 Cerrar y Descargar")]
     ]
     return ReplyKeyboardMarkup(teclado, resize_keyboard=True)
 
@@ -120,49 +112,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{aviso_perfil}"
         )
     
-    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=obtener_teclado_principal(user.id))
-
-# --- Flujo: Mini App / Panel Web Interactivo ---
-
-async def cmd_abrir_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    comision = db.obtener_comision_activa(user_id)
-    if comision:
-        estado_txt = (
-            f"📌 *Resolución:* `{comision['numero_resolucion']}`\n"
-            f"📍 *Destino:* {comision['destino']}\n"
-            f"💰 *Monto Asignado:* S/ {comision['monto_asignado']:.2f}"
-        )
-    else:
-        estado_txt = "ℹ️ No tienes ninguna comisión activa en este momento."
-    
-    if WEBAPP_URL and WEBAPP_URL.startswith("https://"):
-        url_final = f"{WEBAPP_URL}?user_id={user_id}"
-        teclado_inline = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📱 Abrir Panel de Rendición", web_app=WebAppInfo(url=url_final))]
-        ])
-        await update.message.reply_text(
-            f"📱 *Telegram Mini App - Rendición UNSAAC*\n\n"
-            f"{estado_txt}\n\n"
-            f"Toca el botón a continuación para abrir la aplicación web dentro de Telegram:",
-            parse_mode="Markdown",
-            reply_markup=teclado_inline
-        )
-    else:
-        url_local = f"http://localhost:8000/?user_id={user_id}"
-        texto_msg = (
-            f"📱 *Telegram Mini App - Rendición UNSAAC*\n\n"
-            f"{estado_txt}\n\n"
-            f"🌐 *Enlace web de tu panel en tiempo real:*\n"
-            f"👉 `{url_local}`\n\n"
-            f"💡 Puedes abrir este enlace en tu navegador para ver la interfaz táctil con tu presupuesto, fotos y gestión en vivo.\n\n"
-            f"*(Al migrar a la nube con HTTPS, este botón abrirá la ventana deslizante nativa dentro de Telegram).*"
-        )
-        await update.message.reply_text(
-            texto_msg,
-            parse_mode="Markdown",
-            reply_markup=obtener_teclado_principal(user_id)
-        )
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=obtener_teclado_principal())
 
 # --- Flujo: Perfil Institucional ---
 
@@ -996,12 +946,9 @@ def main():
     app.add_handler(CommandHandler("saldo", cmd_ver_saldo))
     app.add_handler(CommandHandler("gastos", cmd_mis_gastos))
     app.add_handler(CommandHandler("cerrar", cmd_cerrar_y_descargar))
-    app.add_handler(CommandHandler("miniapp", cmd_abrir_miniapp))
-    app.add_handler(CommandHandler("panel", cmd_abrir_miniapp))
     
     app.add_handler(MessageHandler(filters.Regex("^📊 Ver Saldo / 100%$"), cmd_ver_saldo))
     app.add_handler(MessageHandler(filters.Regex("^🧾 Mis Gastos$"), cmd_mis_gastos))
-    app.add_handler(MessageHandler(filters.Regex("^📱 Abrir Mini App$"), cmd_abrir_miniapp))
     app.add_handler(MessageHandler(filters.Regex("^🏁 Cerrar y Descargar$"), cmd_cerrar_y_descargar))
     
     app.add_handler(conv_perfil)

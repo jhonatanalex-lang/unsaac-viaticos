@@ -1,37 +1,37 @@
 import os
-import sys
-import threading
 import time
-import uvicorn
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def run_web():
-    """Inicia el servidor web FastAPI para la Mini App y el health-check de Render."""
-    from webapp_server import app
-    port = int(os.getenv("PORT", 8000))
-    print(f"🚀 [Web Server] Iniciando FastAPI en el puerto {port}...")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"Bot de Rendicion de Viaticos UNSAAC activo 24/7")
+        
+    def log_message(self, format, *args):
+        return # Silenciar logs HTTP para mantener limpia la consola
 
-def run_bot():
-    """Inicia el bot de Telegram."""
-    from bot import main as bot_main
-    print("🤖 [Telegram Bot] Iniciando daemon de Telegram...")
-    bot_main()
+def run_health_server():
+    port = int(os.getenv("PORT", 8000))
+    print(f"🚀 [Cloud Keep-Alive] Servidor activo en puerto {port}...")
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
 
 if __name__ == "__main__":
     print("==================================================")
-    print("  UNSAAC - Sistema de Rendición de Viáticos       ")
-    print("  Iniciando servicios unificados (Bot + MiniApp)  ")
+    print("  UNSAAC - Bot de Rendición de Viáticos (24/7)    ")
     print("==================================================")
     
-    # 1. Iniciar servidor Web en un hilo secundario
-    web_thread = threading.Thread(target=run_web, daemon=True)
+    # 1. Iniciar servidor ligero keep-alive para Render en hilo secundario
+    web_thread = threading.Thread(target=run_health_server, daemon=True)
     web_thread.start()
-    
-    # Dar 1 segundo para que levante el servidor web
     time.sleep(1)
     
     # 2. Iniciar el bot de Telegram en el hilo principal
-    run_bot()
+    from bot import main as bot_main
+    bot_main()
