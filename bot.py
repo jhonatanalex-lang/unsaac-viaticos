@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
@@ -528,10 +529,54 @@ async def procesar_archivo_comprobante(update: Update, context: ContextTypes.DEF
     nombre_archivo = f"user_{user_id}_com_{comision['id']}_{int(datetime.now().timestamp())}.{extension}"
     ruta_guardada = os.path.join(UPLOADS_DIR, nombre_archivo)
     await file_info.download_to_drive(ruta_guardada)
-    
     context.user_data["ultima_foto"] = ruta_guardada
-    
-    datos_extraidos = extractor.analizar_comprobante(ruta_guardada)
+
+    # 1. Validación rápida de resolución y tamaño mínimo de imagen
+    calidad = extractor.validar_calidad_imagen(ruta_guardada)
+    if not calidad.get("valido", True):
+        await msg_status.delete()
+        await update.message.reply_text(
+            f"⚠️ *FOTO CON RESOLUCIÓN MUY BAJA*\n\n"
+            f"{calidad['motivo']}\n\n"
+            f"📸 *Sugerencia:* Por favor vuelve a tomar la foto más de cerca, enfocando bien los números y con buena luz.\n\n"
+            f"💡 *O escribe el gasto manualmente en el chat, ej:* `85.00 20123456789 Calca`",
+            parse_mode="Markdown",
+            reply_markup=obtener_teclado_principal()
+        )
+        return
+
+    # 2. Análisis con IA con tiempo límite estricto (Timeout de 10s)
+    try:
+        datos_extraidos = await asyncio.wait_for(
+            asyncio.to_thread(extractor.analizar_comprobante, ruta_guardada),
+            timeout=10.0
+        )
+    except asyncio.TimeoutError:
+        await msg_status.delete()
+        await update.message.reply_text(
+            f"⏳ *TIEMPO MÁXIMO DE VERIFICACIÓN SUPERADO*\n\n"
+            f"El escaneo tomó más de 10 segundos debido a baja nitidez, poca luz o lentitud de red.\n\n"
+            f"📸 *Por favor toma una foto más clara y con buena iluminación.*\n\n"
+            f"💡 *O ingresa el monto y RUC por texto en 5 segundos, ej:* `75.00 20456789012`",
+            parse_mode="Markdown",
+            reply_markup=obtener_teclado_principal()
+        )
+        return
+
+    # 3. Detección de comprobante no legible según la IA
+    if datos_extraidos.get("legible") is False:
+        motivo = datos_extraidos.get("motivo", "La foto está muy borrosa, movida o con poca luz.")
+        await msg_status.delete()
+        await update.message.reply_text(
+            f"🔍 *COMPROBANTE NO LEGIBLE*\n\n"
+            f"La IA detectó que el comprobante no se puede leer con certeza:\n_{motivo}_\n\n"
+            f"🛡️ *Para evitar errores en tu rendición contable:*\n"
+            f"📸 Vuelve a tomar la foto enfocando bien los datos.\n\n"
+            f"💡 *O ingresa el gasto manualmente en el chat, ej:* `85.00 20123456789 Sicuani`",
+            parse_mode="Markdown",
+            reply_markup=obtener_teclado_principal()
+        )
+        return
     
     monto = datos_extraidos.get("monto", 0.0)
     ruc = datos_extraidos.get("ruc", "")

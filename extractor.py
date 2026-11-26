@@ -3,6 +3,7 @@ import re
 import json
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
+from PIL import Image
 
 try:
     import cv2
@@ -12,6 +13,37 @@ except Exception:
     decode = None
 
 import pymupdf # PyMuPDF
+
+def validar_calidad_imagen(ruta_archivo: str) -> Dict[str, Any]:
+    """
+    Valida de forma instantánea si el archivo tiene resolución y tamaño mínimo suficiente
+    para ser legible por OCR / IA antes de procesarlo.
+    """
+    if ruta_archivo.lower().endswith(".pdf"):
+        tam = os.path.getsize(ruta_archivo)
+        if tam < 1024:
+            return {"valido": False, "motivo": "El archivo PDF está vacío o dañado (menos de 1 KB)."}
+        return {"valido": True}
+        
+    try:
+        tam_bytes = os.path.getsize(ruta_archivo)
+        if tam_bytes < 15 * 1024: # Menos de 15 KB
+            return {
+                "valido": False, 
+                "motivo": f"El archivo pesa solo {tam_bytes // 1024} KB. Es demasiado pequeño y comprimido para distinguir los números."
+            }
+            
+        with Image.open(ruta_archivo) as img:
+            ancho, alto = img.size
+            if ancho < 350 or alto < 350:
+                return {
+                    "valido": False,
+                    "motivo": f"La resolución de la foto es muy baja ({ancho}x{alto} px). Se requiere al menos 400x400 px para leer la boleta con certeza."
+                }
+                
+        return {"valido": True}
+    except Exception as e:
+        return {"valido": True}
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -172,8 +204,16 @@ def extraer_con_gemini_vision(ruta_archivo: str) -> Optional[Dict[str, Any]]:
         prompt = """
         Eres un experto auditor contable de comprobantes de pago de Perú (SUNAT).
         Analiza esta imagen/documento de una boleta, factura o ticket de gastos de viaje/viáticos.
-        Extrae la siguiente información en formato JSON estricto:
+        
+        IMPORTANTE: Si la imagen está demasiado borrosa, oscura, cortada, fuera de foco o es ilegible para determinar el monto y el emisor con certeza, responde ÚNICAMENTE con:
         {
+          "legible": false,
+          "motivo": "Explicación breve de por qué no se lee (ej. imagen muy borrosa, fuera de foco, texto cortado o poca luz)"
+        }
+        
+        Si el comprobante es legible, extrae la información en formato JSON estricto:
+        {
+          "legible": true,
           "tipo_comprobante": "Factura" | "Boleta" | "Ticket" | "Declaración Jurada" | "Pasaje",
           "serie_numero": "ej. B001-000451 o 001-0000418",
           "ruc": "RUC del EMISOR (11 dígitos que empieza con 10 o 20)",
@@ -188,8 +228,8 @@ def extraer_con_gemini_vision(ruta_archivo: str) -> Optional[Dict[str, Any]]:
         Responde ÚNICAMENTE con el bloque JSON, sin texto adicional ni markdown.
         """
         
-        # Intentar modelos modernos de Gemini
-        modelos_a_probar = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash"]
+        # Priorizar modelos ultra-rápidos de Gemini
+        modelos_a_probar = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
         response = None
         for mod in modelos_a_probar:
             try:
@@ -216,6 +256,15 @@ def extraer_con_gemini_vision(ruta_archivo: str) -> Optional[Dict[str, Any]]:
             texto_resp = texto_resp.strip()
             
         data = json.loads(texto_resp)
+        
+        # Si la IA determinó que la imagen es ilegible
+        if data.get("legible") is False:
+            return {
+                "legible": False,
+                "motivo": data.get("motivo", "La foto está muy borrosa, movida o con poca luz."),
+                "origen": "GEMINI_IA"
+            }
+            
         monto_raw = str(data.get("monto_total", data.get("total", 0.0))).replace(",", "").replace("S/", "").strip()
         try:
             monto_final = float(monto_raw)
@@ -223,6 +272,7 @@ def extraer_con_gemini_vision(ruta_archivo: str) -> Optional[Dict[str, Any]]:
             monto_final = 0.0
             
         return {
+            "legible": True,
             "origen": "GEMINI_IA",
             "ruc": str(data.get("ruc", "")).strip(),
             "razon_social": data.get("razon_social", ""),
