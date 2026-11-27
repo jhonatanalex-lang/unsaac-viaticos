@@ -22,6 +22,24 @@ def run_health_server():
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
+def keep_alive_self_ping():
+    """
+    Realiza un ping cada 9 minutos al dominio público de Render
+    para evitar que el servidor gratuito entre en hibernación por inactividad.
+    """
+    import requests
+    time.sleep(45) # Esperar 45 segundos para que el servidor esté 100% arriba
+    cloud_url = os.getenv("RENDER_EXTERNAL_URL", "https://unsaac-viaticos.onrender.com")
+    print(f"🔄 [Keep-Alive Ping] Monitoreando {cloud_url} cada 9 minutos...")
+    
+    while True:
+        try:
+            r = requests.get(cloud_url, timeout=20)
+            print(f"💓 [Keep-Alive Ping] Status {r.status_code} - Servidor mantenido despierto.")
+        except Exception as e:
+            print(f"⚠️ [Keep-Alive Ping]: {e}")
+        time.sleep(9 * 60) # 9 minutos (Render duerme a los 15 min)
+
 if __name__ == "__main__":
     print("==================================================")
     print("  UNSAAC - Bot de Rendición de Viáticos (24/7)    ")
@@ -32,6 +50,10 @@ if __name__ == "__main__":
     web_thread.start()
     time.sleep(1)
     
-    # 2. Iniciar el bot de Telegram en el hilo principal
+    # 2. Iniciar bucle de auto-ping para evitar la hibernación de los 15 minutos
+    ping_thread = threading.Thread(target=keep_alive_self_ping, daemon=True)
+    ping_thread.start()
+    
+    # 3. Iniciar el bot de Telegram en el hilo principal
     from bot import main as bot_main
     bot_main()
